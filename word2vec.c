@@ -192,7 +192,10 @@ void print_vocab(){
     printf("totalworld:%d\n",cur_word_num);
     int vocab_i=0;
     while(vocab_i<cur_word_num){
-        printf("序号:%d  词频:%d  单词:%s\n",vocab_i,vocab[vocab_i].cn,vocab[vocab_i].word);
+        printf("序号:%d  词频:%d  单词:%s  num:%d\n",vocab_i,vocab[vocab_i].cn,vocab[vocab_i].word,vocab[vocab_i].num);
+        for(int i=0;i<vec_dim;i++)
+            printf("%f  ",vocab[vocab_i].point[i]);
+        printf("\n");
         vocab_i++;
     }
 }
@@ -271,7 +274,7 @@ void train(){
     int word_number[50];   //每个单词对应词典位置编号,需要窗口大小小于50
     int flag;              //快速查找块上是否找到所需单词
     //print_sample();
-    print_vocab();
+    //print_vocab();
 
     float* EH;
     EH = (float*)malloc(vec_dim*sizeof(float));   //存储误差
@@ -306,10 +309,10 @@ void train(){
                     }
                 }
             }
-            for(int i=0;i<windows;i++){  
-                //打印待处理单词的词典编号
-                printf("序号:%d 单词:%s\n",word_number[i],phase[trained_num_sample][i]);
-            }
+            // for(int i=0;i<windows;i++){  
+            //     //打印待处理单词的词典编号
+            //     printf("序号:%d 单词:%s\n",word_number[i],phase[trained_num_sample][i]);
+            // }
             //隐藏层相乘得出隐藏层向量
             for(int i=0;i<vec_dim;i++){
                 for(int j=1;j<windows;j++)
@@ -370,21 +373,17 @@ void train(){
         //printf("//////////////\n");
         //printf("trained_num_sample:%d  current error:%f\n",trained_num_sample,err_total);
         }
-    printf("trained_num_sample:%d\n",trained_num_sample);
-    for(int i=0;i<cur_word_num;i++)
-        printf("%f\n",output_layer[i]);
-     printf("\n");
-     printf("//////////////////////");
-     printf("\n");
-    //添加词向量
-    for(int i=0;i<windows;i++){ 
+    // printf("trained_num_sample:%d\n",trained_num_sample);
+    // for(int i=0;i<cur_word_num;i++)
+    //     printf("%f\n",output_layer[i]);
+    //  printf("\n");
+    //  printf("//////////////////////");
+    //  printf("\n");
+    //添加词向量到词典中
+    for(int i=1;i<windows;i++){ 
         for(int j=0;j<vec_dim;j++)
             vocab[word_number[i]].point[j] = hid_lay_matrix[i][word_number[i]][j];
         vocab[word_number[i]].num++;
-    }
-    for(int i=0;i<cur_word_num;i++){
-        for(int j=0;j<vec_dim;j++)
-            vocab[i].point[j] = (vocab[i].point[j])/(vocab[i].num);
     }
     err_total = 1;
     trained_num_sample++;
@@ -395,6 +394,10 @@ void train(){
     for(int i=0;i<cur_word_num;i++)
         output_layer[i] = 0;
     }
+    for(int i=0;i<cur_word_num;i++){ //取平均值
+        for(int j=0;j<vec_dim;j++)
+            vocab[i].point[j] = (vocab[i].point[j])/(vocab[i].num);
+    }
 // 释放内存
 }
 int main(){
@@ -404,6 +407,7 @@ int main(){
     vocab_init();
     ReadFromTrain("data.txt");
     train();
+    print_vocab();
     free(vocab);
     vocab = NULL;
 }
