@@ -12,19 +12,29 @@ struct vocab_word {
   float *point;  // 记录词向量
   char *word;  //单词
   int vec_dim; //词向量维度
-  int num;
+  int num;     //matrix时候用于平均词向量
 };
 struct str_and_number{
     char word[20];
     int number;
     int is_used;
 };
+typedef struct HuffmanNode {
+    struct HuffmanNode* left;
+    struct HuffmanNode* right;
+    int     weight;
+    char*    code;
+    float*   vecor;
+    int      num;
+}HuffmanNode;
+HuffmanNode *Node;
 int ptr_str_num = 0;
 struct str_and_number  str_num[10]; //快速查找所需单词信息，类似catche
 struct vocab_word *vocab;//词汇表
 char ***phase;            //指向训练所用短句
 int cur_word_num = 0;    //词典中单词数量
 int sample_num = 0;      //训练所用短句数量
+int root;                //huffman树根节点位置
 //定义参数
 int windows = 3;
 int vec_dim = 3;   //由使用者输入，为方便调试先预定义
@@ -193,8 +203,8 @@ void print_vocab(){
     int vocab_i=0;
     while(vocab_i<cur_word_num){
         printf("序号:%d  词频:%d  单词:%s  num:%d\n",vocab_i,vocab[vocab_i].cn,vocab[vocab_i].word,vocab[vocab_i].num);
-        for(int i=0;i<vec_dim;i++)
-            printf("%f  ",vocab[vocab_i].point[i]);
+        //for(int i=0;i<vec_dim;i++)
+            //printf("%f  ",vocab[vocab_i].point[i]);
         printf("\n");
         vocab_i++;
     }
@@ -229,7 +239,7 @@ void print_matrix_3(float***matrix,int num,int row,int line){
     }
     printf("全部矩阵打印完成！\n");
 }
-void train(){
+void train_matrix(){
     const float max_error=0.01;
     float err_total = 1;
 //初始化隐藏层向量矩阵，矩阵维度为单词表单词数*word_vec
@@ -400,14 +410,249 @@ void train(){
     }
 // 释放内存
 }
+void Node_select(int num_leaf,int* num1,int*num2,int is_selected[]){
+    int weight1 = max_sentence_length,weight2 = max_sentence_length;
+    for(int i=0;i<2*num_leaf-1;i++){ //找出最小值
+        if(weight1>=Node[i].weight&&is_selected[i]==0&&Node[i].weight!=0){
+            *num1 = i;
+            weight1 = Node[i].weight;
+        }
+    }
+    for(int i=0;i<2*num_leaf-1;i++){ //找出次小值
+        if(weight2>=Node[i].weight&&is_selected[i]==0&&Node[i].weight!=0&&i!=*num1){
+            *num2 = i;
+            weight2 = Node[i].weight;
+        }
+    }
+    is_selected[*num1] = 1;
+    is_selected[*num2] = 1;
+}
+void InitLeaf(){ //置零
+    for(int i=0;i<2*cur_word_num-1;i++){
+        Node[i].weight = 0;
+        Node[i].left = NULL;
+        Node[i].right = NULL;
+        Node[i].code = (char*)malloc(cur_word_num*sizeof(char));
+        for(int j=0;j<cur_word_num;j++)
+            Node[i].code[j] = '\0';
+    }
+    for(int i=0;i<2*cur_word_num-1;i++){
+        Node[i].num = 0;
+        Node[i].vecor = (float*)malloc(vec_dim*sizeof(float));
+        for(int j=0;j<vec_dim;j++){
+            //Node[i].vecor[j] = 1.0 * rand() / RAND_MAX;
+            Node[i].vecor[j] = 0;
+            //printf("%f  ",Node[i].vecor[j]);
+        }
+        //printf("\n");
+    }
+}
+void create_HuffmanTree(){
+    int num_leaf = cur_word_num;
+    int num1,num2;
+    int is_selected[2*cur_word_num-1];
+    int ptr = cur_word_num;
+    Node = (HuffmanNode*)malloc((2*num_leaf-1)*sizeof(HuffmanNode));
+    //初始化所有节点
+    InitLeaf();  
+    //初始化叶子结点
+    for(int i=0;i<num_leaf;i++)
+        Node[i].weight = vocab[i].cn;
+    for(int i=0;i<2*cur_word_num-1;i++)  //辅助数组
+        is_selected[i] = 0;
+    for(int i=num_leaf;i<2*num_leaf-1;i++){ 
+        Node_select(num_leaf,&num1,&num2,is_selected);//挑选两个权值最小的节点
+        Node[ptr].weight = Node[num1].weight+Node[num2].weight;
+        Node[ptr].left = &Node[num1];
+        Node[ptr].right = &Node[num2];
+        ptr++;
+    }
+    root = ptr-1;
+    return;
+}
+void create_HuffmanCode(HuffmanNode root,char* code){
+    int i=0;
+    strcpy(root.code,code);
+    while(code[i]!='\0')
+        i++; 
+    if(root.left!=NULL){
+        code[i] = '1';
+        create_HuffmanCode(*root.left,code);
+    }
+    if(root.right!=NULL){
+        code[i] = '0';
+        create_HuffmanCode(*root.right,code);
+    }
+    code[i] = '\0';
+    return;
+}
+void print_HuffmanCode(){
+    for(int i=0;i<cur_word_num;i++)
+        printf("序号:%d code:%s\n",i,Node[i].code);
+}
+float sigmoid(float num){
+    return 1/(1+exp(-num));
+}
+void train_HuffmanTree(){
+    //print_sample();
+    //print_vocab();
+    const float base_prob = 0.95;
+    float  cur_prob = 0;
+    char*  code;
+    int    word_number[50];   //每个单词对应词典位置编号,需要窗口大小小于50
+    int    flag;              //快速查找块上是否找到所需单词
+    float* input;             //输入向量X
+    int    digits = 0;            //拐弯的次数
+    float* update_leafNode;   //存储叶子结点向量更新
+    update_leafNode = (float*)malloc(vec_dim*sizeof(float));
+    for(int i=0;i<vec_dim;i++)
+        update_leafNode[i] = 0;
+    input = (float*)malloc(vec_dim*sizeof(float));
+    for(int i=0;i<vec_dim;i++)      //置空
+        input[i] = 0;
+    code = (char*)malloc(cur_word_num*sizeof(char));
+    for(int i=0;i<cur_word_num;i++) //置空
+        code[i] = '\0';
+    create_HuffmanTree();  //创建huffman树
+    create_HuffmanCode(Node[2*cur_word_num-2],code);  //根据huffman树编码
+    //print_HuffmanCode();
+    int trained_num_sample = 0;
+    while(trained_num_sample<sample_num){
+        //找到每个窗口单词对应的词典单词编号
+        for(int i=0;i<windows;i++){
+            flag = 0;
+            for(int j=0;j<10;j++){
+                if( strcmp(str_num[j].word,phase[trained_num_sample][i])==0 ){
+                    word_number[i] = str_num[j].number;    //最近访问的单词中找到所需单词
+                    flag = 1;
+                    break;
+                }
+            }
+            if(flag==0){
+                //未找到所需单词序号
+                for(int k=0;k<cur_word_num;k++){
+                    if(strcmp(vocab[k].word,phase[trained_num_sample][i])==0 ){
+                        word_number[i] = k;
+                        str_num[ptr_str_num].is_used = 1;   //更改快速查找块
+                        str_num[ptr_str_num].number = k;
+                        strcpy(str_num[ptr_str_num].word,phase[trained_num_sample][i]);
+                        ptr_str_num = (ptr_str_num+1)%10;
+                        break;
+                    }
+                }
+            }
+        }
+        for(int i=0;i<windows;i++){  
+             //打印待处理单词的词典编号
+             //printf("序号:%d 单词:%s\n",word_number[i],phase[trained_num_sample][i]);
+        }
+        //算出输入向量
+        // for(int i=0;i<vec_dim;i++){
+        //     input[i] = 0;
+        //     for(int j=1;j<windows;j++)
+        //         input[i] += Node[word_number[j]].vecor[i];
+        //     input[i] = input[i]/(windows-1);
+        // }
+        for(int i=0;i<vec_dim;i++)
+            input[i] = 1.0 * rand() / RAND_MAX;
+        //huffman节点初始化
+        for(int i=cur_word_num;i<2*cur_word_num-1;i++)
+            for(int j=0;j<vec_dim;j++)
+                Node[i].vecor[j] = 1.0 * rand() / RAND_MAX;
+        
+        while(cur_prob<base_prob){
+            HuffmanNode *curr_Node;
+            cur_prob = 1;
+            float  matrix_mul = 0;
+            float  matrix_mul_result[max_sentence_length];
+            //计算当前概率
+            while(Node[word_number[0]].code[digits]!='\0')  
+                digits++;
+            int pos = 0;
+            curr_Node = &Node[root];
+            while(pos<digits){
+                //矩阵相乘
+                matrix_mul = 0;
+                for(int i=0;i<vec_dim;i++)
+                    matrix_mul += curr_Node->vecor[i]*input[i];
+                matrix_mul_result[pos] = sigmoid(matrix_mul);   //记录每步矩阵相乘结果
+                if(Node[word_number[0]].code[pos]=='1'){
+                    cur_prob = cur_prob*(1-sigmoid(matrix_mul));
+                    curr_Node = curr_Node->left;
+                }
+                else{   
+                    cur_prob = cur_prob*sigmoid(matrix_mul);
+                    curr_Node = curr_Node->right;
+                }
+                pos++;
+            }
+            //huffman节点更新参数
+            curr_Node = &Node[root]; 
+            int djw;
+            pos = 0;
+            while(pos<digits){
+                if(Node[word_number[0]].code[pos]=='1') djw = 1;
+                    else djw = 0;
+                for(int i=0;i<vec_dim;i++)
+                    curr_Node->vecor[i] += eta*(1-djw-matrix_mul_result[pos])*input[i];
+                if(djw)
+                    curr_Node = curr_Node->left;
+                else
+                    curr_Node = curr_Node->right;
+                pos++;
+            }
+            //词向量更新
+            curr_Node = &Node[root]; 
+            pos = 0;
+            for(int i=0;i<vec_dim;i++)
+                update_leafNode[i] = 0;
+            while(pos<digits){
+                if(Node[word_number[0]].code[pos]=='1') djw = 1;
+                    else djw = 0;
+                for(int i=0;i<vec_dim;i++)
+                    update_leafNode[i] += (1-djw-matrix_mul_result[pos])*curr_Node->vecor[i];
+                if(djw)
+                    curr_Node = curr_Node->left;
+                else
+                    curr_Node = curr_Node->right;
+                pos++;
+            }
+            for(int i=1;i<windows;i++){
+                for(int j=0;j<vec_dim;j++)
+                    Node[word_number[i]].vecor[j] += update_leafNode[j];
+            }
+            for(int i=0;i<vec_dim;i++)
+                input[i] += update_leafNode[i];
+                //printf("cur_prob:%f\n",cur_prob);
+        }
+        for(int i=0;i<windows;i++)
+            Node[word_number[i]].num++;
+        // printf("\\\\\\\\\\\\\\\\\\\\\\\\");
+        // putchar('\n');
+        //printf("number:%d,prob:%f\n",trained_num_sample,cur_prob);
+        // printf("\\\\\\\\\\\\\\\\\\\\\\\\");
+        // putchar('\n');
+        cur_prob = 0;
+        digits = 0;
+        trained_num_sample++;
+    }
+    for(int i=0;i<cur_word_num;i++){
+        for(int j=0;j<vec_dim;j++){
+            vocab[i].point[j] = Node[i].vecor[j]/(Node[i].num);
+            //printf("%f  ",vocab[i].point[j]);
+        }
+        //printf("\n");
+    }
+}
 int main(){
     srand(time(NULL)); //随机数种子
     //scanf("%d",&vec_dim);
     vocab = (struct vocab_word *)malloc(vocab_max_size*sizeof(struct vocab_word));
     vocab_init();
     ReadFromTrain("data.txt");
-    train();
-    print_vocab();
+    //train_matrix();
+    train_HuffmanTree();
+    //print_vocab();
     free(vocab);
     vocab = NULL;
 }
