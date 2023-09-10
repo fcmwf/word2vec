@@ -5,7 +5,7 @@
 #include <math.h>
 
 #define max_sentence_length 1000       //句子最长为1000个单词
-#define vocab_max_size      1000       //词汇表最多1000个单词
+#define vocab_max_size      100000       //词汇表最多1000个单词
 //词表结构
 struct vocab_word {
   long long cn;//词频
@@ -36,8 +36,8 @@ int cur_word_num = 0;    //词典中单词数量
 int sample_num = 0;      //训练所用短句数量
 int root;                //huffman树根节点位置
 //定义参数
-int windows = 3;
-int vec_dim = 3;   //由使用者输入，为方便调试先预定义
+int windows = 10;
+int vec_dim = 100;   //由使用者输入，为方便调试先预定义
 float eta = 0.5;
 
 void Serial_number(int* begin,int *end,int i,int j){
@@ -132,7 +132,7 @@ void ReadFromTrain(char str[]){
     while (fgets(buffer, sizeof(buffer), fp) != NULL) {
         int i = 0;                 //去除标点符号
         while(buffer[i]){     
-            if(buffer[i]=='!'||buffer[i]==','||buffer[i]=='.')
+            if(buffer[i]=='!'||buffer[i]==','||buffer[i]=='.'||buffer[i]=='"'||buffer[i]=='?'||buffer[i]=='-'||buffer[i]==':')
                 buffer[i] = ' ';
             i++;
         }
@@ -162,18 +162,27 @@ void ReadFromTrain(char str[]){
             Serial_number(&begin,&end,i,j);
             for(k=0;k<windows;k++){
                 strcpy(arr[sample_num][k],buffer_token[begin+k]);
+                //printf("%d\n",sample_num);
+                //printf("%s\n",buffer_token[begin+k]);
             }
+            //printf("%d\n",sample_num);
             strcpy(temp,arr[sample_num][0]);
             strcpy(arr[sample_num][0],arr[sample_num][j-begin]);
             strcpy(arr[sample_num][j-begin],temp);
             sample_num++;
-            if (sample_num > dim1) { // 如果空间不够，重新分配
+            if (sample_num >=dim1) { // 如果空间不够，重新分配
                 dim1 += 5000;
                 char ***temp = (char ***)realloc(arr, dim1 * sizeof(char **));
                 if (temp == NULL) {
                     // 处理内存分配失败的情况
                     printf("内存分配失败\n");
                     return ;
+                }
+                for (int i = dim1-5000; i < dim1; i++) {
+                    temp[i] = (char **)malloc(dim2 * sizeof(char *));
+                    for (int j = 0; j < dim2; j++) {
+                        temp[i][j] = (char *)malloc(dim3 * sizeof(char));
+                    }
                 }
                 arr = temp; // 更新外部作用域的arr指针
             }
@@ -203,8 +212,8 @@ void print_vocab(){
     int vocab_i=0;
     while(vocab_i<cur_word_num){
         printf("序号:%d  词频:%d  单词:%s  num:%d\n",vocab_i,vocab[vocab_i].cn,vocab[vocab_i].word,vocab[vocab_i].num);
-        //for(int i=0;i<vec_dim;i++)
-            //printf("%f  ",vocab[vocab_i].point[i]);
+        for(int i=0;i<vec_dim;i++)
+            printf("%f  ",vocab[vocab_i].point[i]);
         printf("\n");
         vocab_i++;
     }
@@ -644,6 +653,33 @@ void train_HuffmanTree(){
         //printf("\n");
     }
 }
+void output1(){
+    FILE *file = fopen("output_world.txt", "w");
+    // 检查文件是否成功打开
+    if (file == NULL) {
+        printf("无法创建文件。\n");
+        return ; // 返回错误代码
+    }
+    for(int i=0;i<cur_word_num;i++){
+        fprintf(file,"%s\n",vocab[i].word);
+        for(int j=0;j<vec_dim;j++)
+            fprintf(file, "%f ",vocab[i].point[j]);
+        fprintf(file,"\n");
+    }
+}
+void output2(){
+    FILE *file = fopen("output.txt", "w");
+    // 检查文件是否成功打开
+    if (file == NULL) {
+        printf("无法创建文件。\n");
+        return ; // 返回错误代码
+    }
+    for(int i=0;i<cur_word_num;i++){
+        for(int j=0;j<vec_dim;j++)
+            fprintf(file, "%f ",vocab[i].point[j]);
+        fprintf(file,"\n");
+    }
+}
 int main(){
     srand(time(NULL)); //随机数种子
     //scanf("%d",&vec_dim);
@@ -651,8 +687,12 @@ int main(){
     vocab_init();
     ReadFromTrain("data.txt");
     //train_matrix();
+    //print_sample();
+    //print_vocab();
     train_HuffmanTree();
     //print_vocab();
+    output1();
+    output2();
     free(vocab);
     vocab = NULL;
 }
